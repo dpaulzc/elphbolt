@@ -47,7 +47,7 @@ auto-tests = false
 library = true
 
 [[executable]]
-name="elphbolt"
+name="double_layer"
 source-dir="app"
 main="elphbolt.f90"
 

@@ -158,6 +158,13 @@ module numerics_module
      !! Use permutation symmetries in ph-ph?
      logical :: calculate_3ph_phasespace
      !! Calculate 3ph phasespace?
+     logical :: double_layer !! double layer
+     !! Double layer setup, with same crystal setup
+     real(r64) :: layer_gap 
+     !! Distance between layers in nm
+     integer(i64) :: layers 
+     !! Number of layers, only supports 2 for now 
+
    contains
 
      procedure :: initialize=>read_input_and_setup, create_chempot_dirs
@@ -189,7 +196,8 @@ contains
          phbound, phdef_Tmat, onlyphbte, onlyebte, elchimp, elbound, drag, plot_along_path, &
          phthinfilm, phthinfilm_ballistic, fourph, use_Wannier_ifc2s, phiso_Tmat, Bfield_on, &
          W_OTF, Y_OTF, solve_bulk, solve_nano, elel, &
-         restart_from_batch_record, use_perm, calculate_3ph_phasespace
+         restart_from_batch_record, use_perm, calculate_3ph_phasespace, double_layer
+    real(r64) :: layer_gap
 
     namelist /numerics/ qmesh, mesh_ref, fsthick, datadumpdir, read_gq2, read_gk2, &
          read_V, read_W, tetrahedra, phe, phiso, phsubs, onlyphbte, onlyebte, maxiter, &
@@ -199,7 +207,7 @@ contains
          fourph, fourph_mesh_ref, use_Wannier_ifc2s, elel, Coulomb_screening_type, ncont_mesh,&
          phiso_Tmat, phiso_1B_theory, Bfield_on, Bfield, W_OTF, Y_OTF, &
          solve_bulk, solve_nano, num_batches, restart_from_batch_record, use_perm, &
-         calculate_3ph_phasespace
+         calculate_3ph_phasespace, double_layer, layer_gap
 
     call subtitle("Reading numerics information...")
 
@@ -258,6 +266,9 @@ contains
     restart_from_batch_record = .false.
     use_perm = .false.
     calculate_3ph_phasespace = .false.
+    double_layer = .false.
+    layer_gap = 1e10
+
     read(1, nml = numerics)
 
     if(read_W .and. W_OTF) &
@@ -309,6 +320,16 @@ contains
 !!$          call exit_with_message("B-field has to be of the form [B 0 0], [0 B 0], or [0 0 B]. Exiting.")
 !!$       end if
     end if
+
+    ! double layer stuff
+    self%double_layer = double_layer
+    if(self%double_layer) then
+       self%layers = 2
+       self%layer_gap = layer_gap
+    else
+       self%layers = 1
+    end if
+       
 
     !TODO
     !! [ ] Read eco mode info from input
@@ -508,6 +529,11 @@ contains
        else
           write(*, "(A, (3I5,x))") "k-mesh = ", self%mesh_ref*self%qmesh(1), self%mesh_ref*self%qmesh(2), &
                self%mesh_ref*self%qmesh(3)
+       end if
+       !Double layer stuff
+       write(*, "(A, L)") "Double Layer? :: ", self%double_layer
+       if(self%double_layer) then
+          write(*, "(A, 1E16.8, A)") "Layer gap = ", self%layer_gap, " nm"
        end if
        if(self%fourph) then
           if(crys%twod) then

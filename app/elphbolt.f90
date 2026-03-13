@@ -41,8 +41,11 @@ program elphbolt
   use nano_module, only: nanostructure
   use bte_nano_module, only: bte_nano
 
+  !use layer_module, only: layer
+
   implicit none
 
+!$!   type(layer), allocatable :: active, passive
   type(numerics) :: num
   type(crystal) :: crys
   type(symmetry) :: sym
@@ -70,6 +73,15 @@ program elphbolt
 
   !Calculate crystal and BZ symmetries
   call sym%calculate_symmetries(crys, num%qmesh)
+
+!$!   allocate(active)
+!$!   ! Read layer info
+!$!   call active%read
+!$!   call active%set_layer  !
+!$!   if(active%double_layer) then
+!$!      allocate(passive)
+!$!      call passive%set_layer
+!$!   end if
 
   sync all
   call t_event%end_timer('Initialization')
@@ -305,12 +317,13 @@ program elphbolt
   case(2) !BTE Post-processing case
      call subtitle("Post-processing...")
 
-     !Read RTA response functions from finished calculation
-     if(num%onlyphbte .and. .not. num%phe) then
-        call bt%post_process(num, crys, sym, ph)
-     else
-        call bt%post_process(num, crys, sym, ph, el)
-     end if
+!$!      !Read RTA response functions from finished calculation
+!$!      if(num%onlyphbte .and. .not. num%phe) then
+!$!         call bt%post_process(num, crys, sym, ph)
+!$!      else
+!$!         call bt%post_process(num, crys, sym, ph, el)
+!$!      end if
+     call exit_with_message('Post-processing is not ready yet!!.')
   case default
      call exit_with_message('Unknown runlevel. Exiting.')
   end select
@@ -318,7 +331,7 @@ program elphbolt
   call t_all%end_timer('elphbolt')
 
   call print_message('______________________Thanks for using elphbolt. Bye!______________________')
-
+  
 contains
 
   subroutine welcome

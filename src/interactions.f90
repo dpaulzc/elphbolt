@@ -152,6 +152,44 @@ contains
     gchimp2_RPA = prefac*overlap*Gsum !ev^2
   end function gchimp2_RPA
 
+!$!   pure real(r64) function gCoul2_TF(el, crys, qcart, evec_k, evec_kp)
+!$!     !! Function to calculate the Thomas-Fermi screened
+!$!     !! squared electron-electron vertex.
+!$! 
+!$!     type(crystal), intent(in) :: crys
+!$!     type(electron), intent(in) :: el
+!$!     real(r64), intent(in) :: qcart(3)
+!$!     complex(r64), intent(in) :: evec_k(:), evec_kp(:)
+!$! 
+!$!     real(r64) :: prefac, overlap, screened_qTF_sq
+!$!     real(r64) :: Gsum, Gplusq(3)
+!$!     integer :: ik1, ik2, ik3
+!$! 
+!$!     !Note that here we use an extra screening with epsiloninf following
+!$!     !Sanborn's prescription.
+!$!     prefac = 1.0e18_r64/crys%volume**2*qe**2/(crys%epsiloninf*perm0)**2
+!$! 
+!$!     !This is [U(k')U^\dagger(k)]_nm squared
+!$!     !(Recall that the electron eigenvectors came out daggered from el_wann_epw.)
+!$!     overlap = (abs(dot_product(evec_kp, evec_k)))**2
+!$! 
+!$!     ! Pre screened Thomas Fermi wavevector squared, to match Sanborn's prescription 
+!$!     screened_qTF_sq = crys%qTF**2/crys%epsiloninf
+!$! 
+!$!     !Here ignore local field effects. That is, epsilon^{-1}(G /= G') = 0. 
+!$!     Gsum = 0.0_r64
+!$!     do concurrent(ik1 = -1:1, ik2 = -1:1, ik3 = -1:1)
+!$!        Gplusq = (ik1*crys%reclattvecs(:, 1) &
+!$!             + ik2*crys%reclattvecs(:, 2) &
+!$!             + ik3*crys%reclattvecs(:, 3)) + qcart
+!$! 
+!$!        Gsum = Gsum + &
+!$!             1.0_r64/(twonorm(Gplusq)**2 + screened_qTF_sq)**2 !eV^2
+!$!     end do
+!$! 
+!$!     gCoul2_TF = Gsum*prefac*overlap
+!$!   end function gCoul2_TF
+
   pure real(r64) function gCoul2_TF(el, crys, qcart, evec_k, evec_kp)
     !! Function to calculate the Thomas-Fermi screened
     !! squared electron-electron vertex.
@@ -161,7 +199,7 @@ contains
     real(r64), intent(in) :: qcart(3)
     complex(r64), intent(in) :: evec_k(:), evec_kp(:)
 
-    real(r64) :: prefac, overlap, screened_qTF_sq
+    real(r64) :: prefac, overlap, screened_qTF
     real(r64) :: Gsum, Gplusq(3)
     integer :: ik1, ik2, ik3
 
@@ -173,10 +211,13 @@ contains
     !(Recall that the electron eigenvectors came out daggered from el_wann_epw.)
     overlap = (abs(dot_product(evec_kp, evec_k)))**2
 
-    ! Pre screened Thomas Fermi wavevector squared, to match Sanborn's prescription 
-    screened_qTF_sq = crys%qTF**2/crys%epsiloninf
+    ! Pre screened Thomas Fermi wavevector, to match Sanborn's prescription
+    screened_qTF = crys%qTF**(crys%dim - 1)/crys%epsiloninf
 
-    !Here ignore local field effects. That is, epsilon^{-1}(G /= G') = 0. 
+    ! gcoul normalised by area in 2D case (extra 2 square factor comes from V_2D)
+    if(crys%twod) prefac = prefac*crys%thickness**2/4
+
+    !Here ignore local field effects. That is, epsilon^{-1}(G /= G') = 0.
     Gsum = 0.0_r64
     do concurrent(ik1 = -1:1, ik2 = -1:1, ik3 = -1:1)
        Gplusq = (ik1*crys%reclattvecs(:, 1) &
@@ -184,11 +225,55 @@ contains
             + ik3*crys%reclattvecs(:, 3)) + qcart
 
        Gsum = Gsum + &
-            1.0_r64/(twonorm(Gplusq)**2 + screened_qTF_sq)**2 !eV^2
+            1.0_r64/(twonorm(Gplusq)**(crys%dim-1) + screened_qTF)**2 !eV^2
     end do
 
     gCoul2_TF = Gsum*prefac*overlap
   end function gCoul2_TF
+  
+  pure real(r64) function gCoul2_TF2D_inter(el, crys, qcart, evec_k, evec_kp, d)
+    !! Function to calculate the Thomas-Fermi screened
+    !! squared electron-electron vertex between 2D layers.
+    !! Note: in future, it can be fused with intralayer subroutine
+
+    type(crystal), intent(in) :: crys
+    type(electron), intent(in) :: el
+    real(r64), intent(in) :: qcart(3), d
+    complex(r64), intent(in) :: evec_k(:), evec_kp(:)
+
+    real(r64) :: prefac, overlap, screened_qTF
+    real(r64) :: Gsum, Gplusq(3), Gplusq_mag
+    integer :: ik1, ik2, ik3
+
+    !Note that here we use an extra screening with epsiloninf following
+    !Sanborn's prescription.
+    prefac = 1.0e18_r64/crys%volume**2*qe**2/(crys%epsiloninf*perm0)**2 
+
+    !This is [U(k')U^\dagger(k)]_nm squared
+    !(Recall that the electron eigenvectors came out daggered from el_wann_epw.)
+    overlap = (abs(dot_product(evec_kp, evec_k)))**2
+
+    ! Pre screened Thomas Fermi wavevector squared, to match Sanborn's prescription 
+    screened_qTF = crys%qTF/crys%epsiloninf
+
+    ! Volume->area for 2D 
+    prefac = prefac*crys%thickness**2/4
+
+    !Here ignore local field effects. That is, epsilon^{-1}(G /= G') = 0. 
+    Gsum = 0.0_r64
+    do concurrent(ik1 = -1:1, ik2 = -1:1, ik3 = -1:1)
+       Gplusq = (ik1*crys%reclattvecs(:, 1) &
+            + ik2*crys%reclattvecs(:, 2) &
+            + ik3*crys%reclattvecs(:, 3)) + qcart
+       Gplusq_mag = twonorm(Gplusq)
+       
+       !extra exp(-qd) factor for interlayer
+       Gsum = Gsum + &
+            exp(-Gplusq_mag*d*2)/(Gplusq_mag + screened_qTF)**2!eV^2
+    end do
+
+    gCoul2_TF2D_inter = Gsum*prefac*overlap
+  end function gCoul2_TF2D_inter
 
   pure real(r64) function gCoul2_RPA(el, crys, qcart, evec_k, evec_kp, X0_qw)
     !! Function to calculate the RPA screened squared electron-electron vertex.
@@ -3062,15 +3147,17 @@ contains
   end subroutine calculate_Xee_OTF
 
   subroutine calculate_Xee_13_OTF(el, num, istate1, istate3, crys, X, &
-       istate_el2, istate_el4)
+       istate_el2, istate_el4, d)
     !! On-the-fly serial calculator of the e-e transition probability.
     !! for a given IBZ state (1) and FBZ state (3) pair within the transport window.
+    !! Interlayer is d is present.
     !!
     !! el Electron data type
     !! num Numerics data type
     !! istate1 1st electron state
     !! istate3 3rd electron state
     !! crys Crystal data type
+    !! d interlayer distance
     !! X Transition rate
     !! istate_el2 2nd electron state
     !! istate_el4 4th electron state
@@ -3081,6 +3168,7 @@ contains
     integer(i64), intent(in) :: istate1
     integer(i64), intent(in) :: istate3
     real(r64), intent(out), allocatable :: X(:)
+    real(r64), intent(in), optional :: d
     integer(i64), intent(out), allocatable, optional :: istate_el2(:), istate_el4(:)
 
     !Local variables
@@ -3221,8 +3309,13 @@ contains
                    ! Squared matrix element screened by Thomas-Fermi or RPA dielectric.
                    ! q = 0 divergence case is handled by the Thomas-Fermi screening.
                    if(all(q_vec%cart == 0) .or. num%Coulomb_screening_type == 'TF') then
-                      g2 = gCoul2_TF(el, crys, q_vec%cart, &
-                           el%evecs_irred(ik1, n1, :), el%evecs(ik3, n3, :))
+                      if(present(d)) then  ! only available for TF, for now
+                         g2 = gCoul2_TF2D_inter(el, crys, q_vec%cart, &
+                              el%evecs_irred(ik1, n1, :), el%evecs(ik3, n3, :), d)
+                      else
+                         g2 = gCoul2_TF(el, crys, q_vec%cart, &
+                              el%evecs_irred(ik1, n1, :), el%evecs(ik3, n3, :))
+                      end if
                    else !RPA
                       !Interpolating polarizability from continuous mesh to sampling energy
                       temp = interpolator_1d([(en1 - en3)], Omegas_cont, ReX0_cont) &
@@ -3806,7 +3899,7 @@ contains
     integer(i64) :: nstates_irred, nstates, istate, istate3, nprocs_eph, nprocs_echimp, &
          iproc, chunk, m, ik, ik3, m3, mp, ikp, num_active_images, start, end
     integer(i64), allocatable :: istate_el_echimp(:)
-    real(r64), allocatable :: X(:), X_13(:)
+    real(r64), allocatable :: X(:), X_13(:), X_13_inter(:)
     real(r64) :: k(3), kp(3)
     character(len = 1024) :: filepath_Xp, filepath_Xm, filepath_Xchimp, tag
 
@@ -3853,10 +3946,17 @@ contains
                 call demux_state(istate3, el%numbands, m3, ik3)
 
                 call calculate_Xee_13_OTF(el, num, istate, istate3, crys, X_13)
-
+                
                 do iproc = 1, size(X_13)
                    rta_rates_ee(ik, m) = rta_rates_ee(ik, m) + X_13(iproc)
                 end do
+
+                if(num%double_layer) then
+                   call calculate_Xee_13_OTF(el, num, istate, istate3, crys,  X_13_inter, d = num%layer_gap)
+                   do iproc = 1, size(X_13_inter)
+                      rta_rates_ee(ik, m) = rta_rates_ee(ik, m) + X_13_inter(iproc)
+                   end do
+                end if
              end do
           end if
 
