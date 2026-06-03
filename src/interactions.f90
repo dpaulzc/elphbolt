@@ -190,7 +190,48 @@ contains
 !$!     gCoul2_TF = Gsum*prefac*overlap
 !$!   end function gCoul2_TF
 
-  pure real(r64) function gCoul2_TF(el, crys, qcart, evec_k, evec_kp)
+!$!   pure real(r64) function gCoul2_TF(el, crys, qcart, evec_k, evec_kp)
+!$!     !! Function to calculate the Thomas-Fermi screened
+!$!     !! squared electron-electron vertex.
+!$! 
+!$!     type(crystal), intent(in) :: crys
+!$!     type(electron), intent(in) :: el
+!$!     real(r64), intent(in) :: qcart(3)
+!$!     complex(r64), intent(in) :: evec_k(:), evec_kp(:)
+!$! 
+!$!     real(r64) :: prefac, overlap, screened_qTF
+!$!     real(r64) :: Gsum, Gplusq(3)
+!$!     integer :: ik1, ik2, ik3
+!$! 
+!$!     !Note that here we use an extra screening with epsiloninf following
+!$!     !Sanborn's prescription.
+!$!     prefac = 1.0e18_r64/crys%volume**2*qe**2/(crys%epsiloninf*perm0)**2
+!$! 
+!$!     !This is [U(k')U^\dagger(k)]_nm squared
+!$!     !(Recall that the electron eigenvectors came out daggered from el_wann_epw.)
+!$!     overlap = (abs(dot_product(evec_kp, evec_k)))**2
+!$! 
+!$!     ! Pre screened Thomas Fermi wavevector, to match Sanborn's prescription
+!$!     screened_qTF = crys%qTF**(crys%dim - 1)/crys%epsiloninf
+!$! 
+!$!     ! gcoul normalised by area in 2D case (extra 2 square factor comes from V_2D)
+!$!     if(crys%twod) prefac = prefac*crys%thickness**2/4
+!$! 
+!$!     !Here ignore local field effects. That is, epsilon^{-1}(G /= G') = 0.
+!$!     Gsum = 0.0_r64
+!$!     do concurrent(ik1 = -1:1, ik2 = -1:1, ik3 = -1:1)
+!$!        Gplusq = (ik1*crys%reclattvecs(:, 1) &
+!$!             + ik2*crys%reclattvecs(:, 2) &
+!$!             + ik3*crys%reclattvecs(:, 3)) + qcart
+!$! 
+!$!        Gsum = Gsum + &
+!$!             1.0_r64/(twonorm(Gplusq)**(crys%dim-1) + screened_qTF)**2 !eV^2
+!$!     end do
+!$! 
+!$!     gCoul2_TF = Gsum*prefac*overlap
+!$!   end function gCoul2_TF
+
+  pure real(r64) function gCoul2_TF(el, crys, qcart, evec_k, evec_kp) ! modified for 2D
     !! Function to calculate the Thomas-Fermi screened
     !! squared electron-electron vertex.
 
@@ -211,30 +252,41 @@ contains
     !(Recall that the electron eigenvectors came out daggered from el_wann_epw.)
     overlap = (abs(dot_product(evec_kp, evec_k)))**2
 
-    ! Pre screened Thomas Fermi wavevector, to match Sanborn's prescription
+    ! Pre screened Thomas Fermi wavevector, to match Sanborn's prescription 
     screened_qTF = crys%qTF**(crys%dim - 1)/crys%epsiloninf
 
     ! gcoul normalised by area in 2D case (extra 2 square factor comes from V_2D)
     if(crys%twod) prefac = prefac*crys%thickness**2/4
 
-    !Here ignore local field effects. That is, epsilon^{-1}(G /= G') = 0.
+    !Here ignore local field effects. That is, epsilon^{-1}(G /= G') = 0. 
     Gsum = 0.0_r64
-    do concurrent(ik1 = -1:1, ik2 = -1:1, ik3 = -1:1)
-       Gplusq = (ik1*crys%reclattvecs(:, 1) &
-            + ik2*crys%reclattvecs(:, 2) &
-            + ik3*crys%reclattvecs(:, 3)) + qcart
+    if(crys%twod) then
+       do concurrent(ik1 = -1:1, ik2 = -1:1)
+          Gplusq = (ik1*crys%reclattvecs(:, 1) &
+               + ik2*crys%reclattvecs(:, 2)) + qcart
 
-       Gsum = Gsum + &
-            1.0_r64/(twonorm(Gplusq)**(crys%dim-1) + screened_qTF)**2 !eV^2
-    end do
+          Gsum = Gsum + &
+               1.0_r64/(twonorm(Gplusq) + screened_qTF)**2 !eV^2
+       end do
+    else
+       do concurrent(ik1 = -1:1, ik2 = -1:1, ik3 = -1:1)
+          Gplusq = (ik1*crys%reclattvecs(:, 1) &
+               + ik2*crys%reclattvecs(:, 2) &
+               + ik3*crys%reclattvecs(:, 3)) + qcart
+
+          Gsum = Gsum + &
+               1.0_r64/(twonorm(Gplusq)**2 + screened_qTF)**2 !eV^2
+       end do
+    end if
 
     gCoul2_TF = Gsum*prefac*overlap
   end function gCoul2_TF
   
-  pure real(r64) function gCoul2_TF2D_inter(el, crys, qcart, evec_k, evec_kp, d)
+  pure real(r64) function gCoul2_inter2D(el, crys, qcart, evec_k, evec_kp, d)
     !! Function to calculate the Thomas-Fermi screened
     !! squared electron-electron vertex between 2D layers.
     !! Note: in future, it can be fused with intralayer subroutine
+    !! Currently bare Coulomb, nextup: static screening
 
     type(crystal), intent(in) :: crys
     type(electron), intent(in) :: el
@@ -243,37 +295,33 @@ contains
 
     real(r64) :: prefac, overlap, screened_qTF
     real(r64) :: Gsum, Gplusq(3), Gplusq_mag
-    integer :: ik1, ik2, ik3
+    integer :: ik1, ik2
 
-    !Note that here we use an extra screening with epsiloninf following
-    !Sanborn's prescription.
-    prefac = 1.0e18_r64/crys%volume**2*qe**2/(crys%epsiloninf*perm0)**2 
+    prefac = 1.0e18_r64/crys%volume**2*qe**2/perm0**2 
+    ! in case of static dielectric, divide by diel**2
 
     !This is [U(k')U^\dagger(k)]_nm squared
     !(Recall that the electron eigenvectors came out daggered from el_wann_epw.)
-    overlap = (abs(dot_product(evec_kp, evec_k)))**2
+    overlap = (abs(dot_product(evec_kp, evec_k)))**2   ! decided to keep, need to discuss
 
-    ! Pre screened Thomas Fermi wavevector squared, to match Sanborn's prescription 
-    screened_qTF = crys%qTF/crys%epsiloninf
-
-    ! Volume->area for 2D 
+    ! Volume->area for 2D   ! need to discuss the area normalization 
     prefac = prefac*crys%thickness**2/4
 
     !Here ignore local field effects. That is, epsilon^{-1}(G /= G') = 0. 
     Gsum = 0.0_r64
-    do concurrent(ik1 = -1:1, ik2 = -1:1, ik3 = -1:1)
+    do concurrent(ik1 = -1:1, ik2 = -1:1)   ! sums on 2D surface
        Gplusq = (ik1*crys%reclattvecs(:, 1) &
-            + ik2*crys%reclattvecs(:, 2) &
-            + ik3*crys%reclattvecs(:, 3)) + qcart
+            + ik2*crys%reclattvecs(:, 2)) + qcart
        Gplusq_mag = twonorm(Gplusq)
        
+       if(Gplusq_mag==0) cycle  ! avoid singularity 
        !extra exp(-qd) factor for interlayer
        Gsum = Gsum + &
-            exp(-Gplusq_mag*d*2)/(Gplusq_mag + screened_qTF)**2!eV^2
+            exp(-Gplusq_mag*d*2)/Gplusq_mag**2!eV^2
     end do
 
-    gCoul2_TF2D_inter = Gsum*prefac*overlap
-  end function gCoul2_TF2D_inter
+    gCoul2_inter2D = Gsum*prefac*overlap
+  end function gCoul2_inter2D
 
   pure real(r64) function gCoul2_RPA(el, crys, qcart, evec_k, evec_kp, X0_qw)
     !! Function to calculate the RPA screened squared electron-electron vertex.
@@ -3309,8 +3357,8 @@ contains
                    ! Squared matrix element screened by Thomas-Fermi or RPA dielectric.
                    ! q = 0 divergence case is handled by the Thomas-Fermi screening.
                    if(all(q_vec%cart == 0) .or. num%Coulomb_screening_type == 'TF') then
-                      if(present(d)) then  ! only available for TF, for now
-                         g2 = gCoul2_TF2D_inter(el, crys, q_vec%cart, &
+                      if(present(d)) then  
+                         g2 = gCoul2_inter2D(el, crys, q_vec%cart, &
                               el%evecs_irred(ik1, n1, :), el%evecs(ik3, n3, :), d)
                       else
                          g2 = gCoul2_TF(el, crys, q_vec%cart, &
@@ -3952,6 +4000,7 @@ contains
                 end do
 
                 if(num%double_layer) then
+                   !print *,"Adding all interlayer scatterings..."
                    call calculate_Xee_13_OTF(el, num, istate, istate3, crys,  X_13_inter, d = num%layer_gap)
                    do iproc = 1, size(X_13_inter)
                       rta_rates_ee(ik, m) = rta_rates_ee(ik, m) + X_13_inter(iproc)

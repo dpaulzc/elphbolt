@@ -247,6 +247,23 @@ contains
     self%el_rta_rates_ibz = self%el_rta_rates_eph_ibz + self%el_rta_rates_echimp_ibz + &
          self%el_rta_rates_ee_ibz + self%el_rta_rates_bound_ibz
 
+    ! RTA solution of BTE
+    !allocate(self%el_response_T(el%nwv, el%numbands, 3))
+    ! double layer
+    if(num%double_layer) then
+       allocate(self%el_response_T(el%nwv, el%numbands, 3, 2))
+       allocate(self%el_response_T_inter(el%nwv, el%numbands, 3, 2))
+       self%el_response_T_inter = 0.0_r64
+       allocate(self%el_response_E(el%nwv, el%numbands, 3, 2))
+       allocate(self%el_response_E_inter(el%nwv, el%numbands, 3, 2))
+       self%el_response_E_inter = 0.0_r64
+    else
+       allocate(self%el_response_T(el%nwv, el%numbands, 3, 1))
+       allocate(self%el_response_E(el%nwv, el%numbands, 3, 1))
+    end if
+
+    ! test
+    !if(this_image()==1) print *,"Order of mag of scatt -->", sum(self%el_rta_rates_ibz)
     !gradT field:
     ! Calculate field term (gradT=>I0)
     call calculate_field_term('el', 'T', el%nequiv, el%ibz2fbz_map, &
@@ -259,19 +276,9 @@ contains
             transpose(matmul(el%symmetrizers(:, :, ik), transpose(self%el_field_term_T(ik, :, :))))
     end do
 
-    ! RTA solution of BTE
-    !allocate(self%el_response_T(el%nwv, el%numbands, 3))
-    ! double layer
-    if(num%double_layer) then
-       allocate(self%el_response_T(el%nwv, el%numbands, 3, 2))
-       allocate(self%el_response_T_inter(el%nwv, el%numbands, 3, 2))
-       self%el_response_T_inter = 0.0_r64
-    else
-      allocate(self%el_response_T(el%nwv, el%numbands, 3, 1))
-    end if
     self%el_response_T = 0.0_r64
     self%el_response_T(:, :, :, 1) = self%el_field_term_T
-
+    
     ! Calculate transport coefficient
     call calculate_transport_coeff('el', 'T', crys%T, el%spindeg, el%chempot, el%ens, &
          el%vels, crys%volume, el%wvmesh, self%el_response_T(:, :, :, 1), sym, trans%el_kappa0, trans%el_sigmaS)
@@ -288,17 +295,10 @@ contains
             transpose(matmul(el%symmetrizers(:, :, ik), transpose(self%el_field_term_E(ik, :, :))))
     end do
 
-    ! RTA solution of BTE
-    ! double layer
-    if (num%double_layer) then
-       allocate(self%el_response_E(el%nwv, el%numbands, 3, 2))
-       allocate(self%el_response_E_inter(el%nwv, el%numbands, 3, 2))
-       self%el_response_E_inter = 0.0_r64
-    else
-       allocate(self%el_response_E(el%nwv, el%numbands, 3, 1))
-    end if
     self%el_response_E = 0.0_r64
-    self%el_response_E(:, :, :, 1) = self%el_field_term_E ! double
+    self%el_response_E(:, :, :, 1) = self%el_field_term_E 
+    if(this_image()==1) print *, shape(self%el_response_E), shape(self%el_field_term_E) 
+    if(this_image()==1) print *, shape(self%el_response_T), shape(self%el_field_term_T) 
 
     ! Calculate transport coefficient
     call calculate_transport_coeff('el', 'E', crys%T, el%spindeg, el%chempot, el%ens, el%vels, &
@@ -332,6 +332,7 @@ contains
 
     !if(.not. num%drag .and. this_image() == 1) then
     if(this_image() == 1) then
+       print *, "Field term -->", sum(self%el_field_term_E)
        call print_message("RTA solution:")
        call print_message("-------------")
        write(*,*) "iter    k0_el[W/m/K]        sigmaS[A/m/K]", &
@@ -497,11 +498,17 @@ contains
     integer :: it_el, icart, it_layer, it_layer_o
     type(transport_coeffs) :: trans
     logical :: layers_converged
+    
     !! dummy field terms
     !! find a better way to do this
     real(r64), allocatable :: field_term_E(:, :, :, :), field_term_T(:, :, :, :)
+    real(r64), allocatable :: test_intra(:, :, :, :)
+    real(r64) :: rho_d
     allocate(field_term_E, mold=self%el_response_E)
     allocate(field_term_T, mold=self%el_response_T)
+    allocate(test_intra, mold=self%el_response_E) ! test intra arrays
+    test_intra=0.0
+
     ! zero_field = 0.0_r64
 
     call trans%initialize_el(el%numbands)
@@ -512,17 +519,15 @@ contains
     call print_message("-----------------------------")
 
     !Restart with RTA solution
-    !self%el_response_T = self%el_field_term_T
-    !self%el_response_E = self%el_field_term_E
     ! Double layer
     self%el_response_T = 0.0_r64
-    self%el_response_T(:,:,:,1) = self%el_field_term_T
+    self%el_response_T(:, :, :, 1) = self%el_field_term_T  ! init
     field_term_T = 0.0_r64 
-    field_term_T(:,:,:, 1) = self%el_field_term_T
+    field_term_T(:, :, :, 1) = self%el_field_term_T
     self%el_response_E = 0.0_r64
-    self%el_response_E(:,:,:,1) = self%el_field_term_E
+    self%el_response_E(:, :, :, 1) = self%el_field_term_E  ! init
     field_term_E = 0.0_r64 
-    field_term_E(:,:,:, 1) = self%el_field_term_E
+    field_term_E(:, :, :, 1) = self%el_field_term_E
 
 
     if(this_image() == 1) then
@@ -539,16 +544,21 @@ contains
              call iterate_bte_el(num, el, crys, &  ! E field response for it_layer
                  self%el_rta_rates_ibz, field_term_E(:, :, :, it_layer), self%el_response_E(:, :, :, it_layer), &
                  response_el_other = self%el_response_E(:, :, :, it_layer_o), &
-                 response_el_inter = self%el_response_E_inter(:, :, :, it_layer))
+                 response_el_inter = self%el_response_E_inter(:, :, :, it_layer), &
+                 test = test_intra(:, :, :, it_layer))
+             !sync all
+             if(it_layer==1 .and. this_image()==1) then
+                print *,"Iterator:",it_el
+                print *, "Layer:", it_layer,", other(",it_layer_o,")"
+                print *, "Intra term ->", sum(test_intra(:, :, :, it_layer))
+                !print *, "E response full ->",sum(self%el_response_E(:, :, :, it_layer))
+                print *, "Inter ->", sum(self%el_response_E_inter(:, :, :, it_layer))
+             end if
              
              call iterate_bte_el(num, el, crys, &  ! delT response for it_layer
-                 self%el_rta_rates_ibz, self%el_field_term_T, self%el_response_T(:, :, :, it_layer), &
+                 self%el_rta_rates_ibz, field_term_T(:, :, :, it_layer), self%el_response_T(:, :, :, it_layer), &
                  response_el_other = self%el_response_T(:, :, :, it_layer_o), &
                  response_el_inter = self%el_response_T_inter(:, :, :, it_layer))
-             if(it_layer==1 .and. this_image()==1) then
-                print *, it_el," E response intra->", sum(self%el_response_E)
-                print *, it_el," inter->", sum(self%el_response_E_inter)
-             end if
           else
              ! can be generalised, this else case is not needed ! DO a test
              call iterate_bte_el(num, el, crys, &  ! single layer, E field
@@ -648,9 +658,15 @@ contains
     call t%end_timer('Iterative dragless e BTE')
 
     sync all
-    if(this_image() == 1) then
-       write(*,*) "Cross layer terms [Sigma12] [Sigma21]"
-       write(*,"(1E16.8, A, 1E16.8)") trans%el_sigma_inter_scalar(1), "    ", trans%el_sigma_inter_scalar(2)
+    if(.true.) then
+       rho_d = trans%el_sigma_inter_scalar(2)/(trans%el_sigma_inter_scalar(1)*trans%el_sigma_inter_scalar(2) -&
+         el_sigma_scalar(1)*el_sigma_scalar(2))
+       if(this_image()==1) then
+          write(*,*) "Cross layer terms [Sigma12] [Sigma21]"
+          write(*,"(1E16.8, A, 1E16.8)") trans%el_sigma_inter_scalar(1), "    ", trans%el_sigma_inter_scalar(2)
+          write(*,*) "Drag resistivity in Ohms"
+          write(*,"(1E16.8)") rho_d/crys%thickness*1e9
+       end if
     end if
   end subroutine dragless_ebte_full
   
@@ -1706,7 +1722,7 @@ contains
 !!$  end subroutine iterate_bte_el
 
   subroutine iterate_bte_el(num, el, crys, rta_rates_ibz, field_term, &
-      response_el, response_el_other, response_el_inter, ph_drag_term)
+      response_el, response_el_other, response_el_inter, ph_drag_term, test)
     !! Subroutine to iterate the electron BTE one step.
     !! 
     !! T Temperature in K
@@ -1723,10 +1739,12 @@ contains
     type(numerics), intent(in) :: num
     type(crystal), intent(in) :: crys
     real(r64), intent(in) :: rta_rates_ibz(:,:), field_term(:,:,:)
+    real(r64), intent(inout) :: response_el(:,:,:)
     real(r64), intent(in), optional :: ph_drag_term(:,:,:)
     !logical, intent(in), optional :: passive
-    real(r64), intent(inout), optional :: response_el_other(:, :, :), response_el_inter(:, :, :)
-    real(r64), intent(inout) :: response_el(:,:,:)
+    real(r64), intent(in), optional :: response_el_other(:, :, :)
+    real(r64), intent(out), optional :: response_el_inter(:, :, :)
+    real(r64), intent(out), optional :: test(:, :, :)
     !real(r64), intent(inout) :: response_el(:,:,:, :) !! double
 
     !Local variables
@@ -1782,8 +1800,10 @@ contains
     if(present(response_el_inter)) then !! response for passive layer
        !Allocate and initialize response reduction array
        allocate(response_el_int_reduce(nk, numbands, 3))
+       response_el_inter = 0.0_r64
        response_el_int_reduce(:,:,:) = 0.0_r64
     end if
+    if(present(test)) test = 0.0_r64
 
     !Divide electron states among images
     call distribute_points(nstates_irred, chunk, start, end, num_active_images)
@@ -1812,6 +1832,7 @@ contains
           tau_ibz = 0.0_r64
           if(rta_rates_ibz(ik_ibz, m) /= 0.0_r64) then
              tau_ibz = 1.0_r64/rta_rates_ibz(ik_ibz, m)
+             !tau_ibz = 0.1_r64  ! keeping it constant, to check
           end if
 
           !Set X+ filename
@@ -1882,6 +1903,23 @@ contains
                    !Fetch image of k3 due to the current symmetry from precomputed list
                    aux3 = ik3_image_array(ieq)
                    
+                   do iproc = 1, nprocs_ee_13  ! Intralayer
+                      !Electron 2
+                      call demux_state(istate_el_ee2(iproc), numbands, n2, ik2)
+                      !Find image of k2 due to the current symmetry
+                      call binsearch(el%indexlist, el%equiv_map(ik_sym, ik2), aux2)
+
+                      !Electron 4
+                      call demux_state(istate_el_ee4(iproc), numbands, n4, ik4)
+                      !Find image of k4 due to the current symmetry
+                      call binsearch(el%indexlist, el%equiv_map(ik_sym, ik4), aux4)
+
+                      response_el_reduce(ik_fbz, m, :) = response_el_reduce(ik_fbz, m, :) + &
+                           Xee_13(iproc)*(-response_el(aux2, n2, :) + response_el(aux3, n3, :) + &
+                           response_el(aux4, n4, :))
+                      if(present(test)) test(ik_fbz, m, :) = response_el_reduce(ik_fbz, m, :)*tau_ibz
+                   end do
+
                    if(present(response_el_inter)) then
                       do iproc = 1, nprocs_ee_13_inter  ! Interlayer
                          !Electron 2
@@ -1899,25 +1937,6 @@ contains
                               response_el_other(aux4, n4, :))
                       end do
                    end if
-
-                   do iproc = 1, nprocs_ee_13  ! Intralayer
-                      !Electron 2
-                      call demux_state(istate_el_ee2(iproc), numbands, n2, ik2)
-                      !Find image of k2 due to the current symmetry
-                      call binsearch(el%indexlist, el%equiv_map(ik_sym, ik2), aux2)
-
-                      !Electron 4
-                      call demux_state(istate_el_ee4(iproc), numbands, n4, ik4)
-                      !Find image of k4 due to the current symmetry
-                      call binsearch(el%indexlist, el%equiv_map(ik_sym, ik4), aux4)
-
-                      response_el_reduce(ik_fbz, m, :) = response_el_reduce(ik_fbz, m, :) + &
-                           Xee_13(iproc)*(-response_el(aux2, n2, :) + response_el(aux3, n3, :) + &
-                           response_el(aux4, n4, :))  
-                      if(present(response_el_inter)) &! adding interlayer stuff
-                         response_el_reduce(ik_fbz, m, :) = &
-                         response_el_reduce(ik_fbz, m, :) + response_el_int_reduce(ik_fbz, m, :)
-                   end do
                 end do
              end do
           end if
@@ -1966,10 +1985,16 @@ contains
              !Iterate BTE
              response_el_reduce(ik_fbz, m, :) = field_term(ik_fbz, m, :) + &
                   response_el_reduce(ik_fbz, m, :)*tau_ibz
+             ! If there is a double layer present
+             if(present(response_el_inter)) then
+                response_el_int_reduce(ik_fbz, m, :) = response_el_int_reduce(ik_fbz, m, :)*tau_ibz  ! normalize
+                response_el_reduce(ik_fbz, m, :) = response_el_reduce(ik_fbz, m, :) + response_el_int_reduce(ik_fbz, m, :)
+             end if
           end do
        end do
     end if
 
+    !sync all
     !Update the response functions
     call co_sum(response_el_reduce)
     response_el = response_el_reduce
@@ -1977,6 +2002,7 @@ contains
        call co_sum(response_el_int_reduce)
        response_el_inter = response_el_int_reduce
     end if
+    if(present(test)) call co_sum(test)
 
     if(present(ph_drag_term)) then
        !Drag contribution:
