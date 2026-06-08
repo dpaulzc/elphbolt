@@ -282,7 +282,7 @@ contains
     gCoul2_TF = Gsum*prefac*overlap
   end function gCoul2_TF
   
-  pure real(r64) function gCoul2_inter2D(el, crys, qcart, evec_k, evec_kp, d)
+  pure real(r64) function gCoul2_inter2D(el, crys, qcart, evec_k, evec_kp, d, epsinf)
     !! Function to calculate the Thomas-Fermi screened
     !! squared electron-electron vertex between 2D layers.
     !! Note: in future, it can be fused with intralayer subroutine
@@ -290,14 +290,14 @@ contains
 
     type(crystal), intent(in) :: crys
     type(electron), intent(in) :: el
-    real(r64), intent(in) :: qcart(3), d
+    real(r64), intent(in) :: qcart(3), d, epsinf
     complex(r64), intent(in) :: evec_k(:), evec_kp(:)
 
     real(r64) :: prefac, overlap, screened_qTF
     real(r64) :: Gsum, Gplusq(3), Gplusq_mag
     integer :: ik1, ik2
 
-    prefac = 1.0e18_r64/crys%volume**2*qe**2/perm0**2 
+    prefac = 1.0e18_r64/crys%volume**2*qe**2/(epsinf*perm0)**2
     ! in case of static dielectric, divide by diel**2
 
     !This is [U(k')U^\dagger(k)]_nm squared
@@ -3359,7 +3359,8 @@ contains
                    if(all(q_vec%cart == 0) .or. num%Coulomb_screening_type == 'TF') then
                       if(present(d)) then  
                          g2 = gCoul2_inter2D(el, crys, q_vec%cart, &
-                              el%evecs_irred(ik1, n1, :), el%evecs(ik3, n3, :), d)
+                              el%evecs_irred(ik1, n1, :), el%evecs(ik3, n3, :), &
+                              d, num%gap_epsinf)
                       else
                          g2 = gCoul2_TF(el, crys, q_vec%cart, &
                               el%evecs_irred(ik1, n1, :), el%evecs(ik3, n3, :))

@@ -164,6 +164,8 @@ module numerics_module
      !! Distance between layers in nm
      integer(i64) :: layers 
      !! Number of layers, only supports 2 for now 
+     real(r64) :: gap_epsinf
+     !! High frequency dielectric for interlayer Coulomb interactions 
 
    contains
 
@@ -197,7 +199,7 @@ contains
          phthinfilm, phthinfilm_ballistic, fourph, use_Wannier_ifc2s, phiso_Tmat, Bfield_on, &
          W_OTF, Y_OTF, solve_bulk, solve_nano, elel, &
          restart_from_batch_record, use_perm, calculate_3ph_phasespace, double_layer
-    real(r64) :: layer_gap
+    real(r64) :: layer_gap, gap_epsinf
 
     namelist /numerics/ qmesh, mesh_ref, fsthick, datadumpdir, read_gq2, read_gk2, &
          read_V, read_W, tetrahedra, phe, phiso, phsubs, onlyphbte, onlyebte, maxiter, &
@@ -207,7 +209,7 @@ contains
          fourph, fourph_mesh_ref, use_Wannier_ifc2s, elel, Coulomb_screening_type, ncont_mesh,&
          phiso_Tmat, phiso_1B_theory, Bfield_on, Bfield, W_OTF, Y_OTF, &
          solve_bulk, solve_nano, num_batches, restart_from_batch_record, use_perm, &
-         calculate_3ph_phasespace, double_layer, layer_gap
+         calculate_3ph_phasespace, double_layer, layer_gap, gap_epsinf
 
     call subtitle("Reading numerics information...")
 
@@ -268,6 +270,7 @@ contains
     calculate_3ph_phasespace = .false.
     double_layer = .false.
     layer_gap = 1e10
+    gap_epsinf = crys%epsiloninf
 
     read(1, nml = numerics)
 
@@ -534,6 +537,7 @@ contains
        write(*, "(A, L)") "Double Layer? :: ", self%double_layer
        if(self%double_layer) then
           write(*, "(A, 1E16.8, A)") "Layer gap = ", self%layer_gap, " nm"
+          write(*, "(A, 1E16.8)") "Epsinf in the gap = ", self%gap_epsinf
        end if
        if(self%fourph) then
           if(crys%twod) then
