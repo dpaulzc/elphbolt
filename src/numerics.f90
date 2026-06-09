@@ -329,6 +329,7 @@ contains
     if(self%double_layer) then
        self%layers = 2
        self%layer_gap = layer_gap
+       self%gap_epsinf = gap_epsinf
     else
        self%layers = 1
     end if
