@@ -166,6 +166,8 @@ module numerics_module
      !! Number of layers, only supports 2 for now 
      real(r64) :: gap_eps
      !! Static dielectric for interlayer Coulomb interactions 
+     logical :: save_el_images
+     !! Store and use images of electron wavevecs for a symmetry?
 
    contains
 
@@ -198,7 +200,8 @@ contains
          phbound, phdef_Tmat, onlyphbte, onlyebte, elchimp, elbound, drag, plot_along_path, &
          phthinfilm, phthinfilm_ballistic, fourph, use_Wannier_ifc2s, phiso_Tmat, Bfield_on, &
          W_OTF, Y_OTF, solve_bulk, solve_nano, elel, &
-         restart_from_batch_record, use_perm, calculate_3ph_phasespace, double_layer
+         restart_from_batch_record, use_perm, calculate_3ph_phasespace, double_layer, &
+         save_el_images
     real(r64) :: layer_gap, gap_eps
 
     namelist /numerics/ qmesh, mesh_ref, fsthick, datadumpdir, read_gq2, read_gk2, &
@@ -209,7 +212,7 @@ contains
          fourph, fourph_mesh_ref, use_Wannier_ifc2s, elel, Coulomb_screening_type, ncont_mesh,&
          phiso_Tmat, phiso_1B_theory, Bfield_on, Bfield, W_OTF, Y_OTF, &
          solve_bulk, solve_nano, num_batches, restart_from_batch_record, use_perm, &
-         calculate_3ph_phasespace, double_layer, layer_gap, gap_eps
+         calculate_3ph_phasespace, double_layer, layer_gap, gap_eps, save_el_images
 
     call subtitle("Reading numerics information...")
 
@@ -270,7 +273,8 @@ contains
     calculate_3ph_phasespace = .false.
     double_layer = .false.
     layer_gap = 1e10
-    gap_eps = 1.0_r64 
+    gap_eps = 1.0_r64
+    save_el_images = .false.
 
     read(1, nml = numerics)
 
@@ -376,6 +380,7 @@ contains
        self%elel = elel
        self%Coulomb_screening_type = trim(Coulomb_screening_type)
        self%ncont_mesh = ncont_mesh
+       self%save_el_images = save_el_images
        self%elbound = elbound
        self%drag = drag
        self%Y_OTF = Y_OTF
@@ -595,6 +600,7 @@ contains
                 write(*, "(A, I5)") "Size of continuous energy mesh: ", self%ncont_mesh
              end if
           end if
+          write(*, "(A, L)") "Save and use el images: ", self%save_el_images
           write(*, "(A, L)") "Include el-boundary interaction: ", self%elbound
           write(*, "(A, L)") "Solve bulk-BTE: ", self%solve_bulk
           write(*, "(A, L)") "Solve nano-BTE: ", self%solve_nano
