@@ -282,30 +282,74 @@ contains
     gCoul2_TF = Gsum*prefac*overlap
   end function gCoul2_TF
   
+!$!   pure real(r64) function gCoul2_inter2D(el, crys, qcart, evec_k, evec_kp, d, eps)
+!$!     !! Function to calculate the bare
+!$!     !! electron-electron vertex between 2D layers.
+!$!     !! Note: in future, it can be fused with intralayer subroutine
+!$!     !! Currently bare Coulomb, nextup: static screening
+!$! 
+!$!     type(crystal), intent(in) :: crys
+!$!     type(electron), intent(in) :: el
+!$!     real(r64), intent(in) :: qcart(3), d, eps
+!$!     complex(r64), intent(in) :: evec_k(:), evec_kp(:)
+!$! 
+!$!     real(r64) :: prefac, overlap, screened_qTF
+!$!     real(r64) :: Gsum, Gplusq(3), Gplusq_mag
+!$!     integer :: ik1, ik2
+!$! 
+!$!     prefac = 1.0e18_r64/crys%volume**2*qe**2/(eps*perm0)**2
+!$!     ! in case of static dielectric, divide by diel**2
+!$! 
+!$!     !This is [U(k')U^\dagger(k)]_nm squared
+!$!     !(Recall that the electron eigenvectors came out daggered from el_wann_epw.)
+!$!     overlap = (abs(dot_product(evec_kp, evec_k)))**2   ! decided to keep, need to discuss
+!$! 
+!$!     ! Volume->area for 2D   ! need to discuss the area normalization 
+!$!     prefac = prefac*crys%thickness**2/4
+!$! 
+!$!     !Here ignore local field effects. That is, epsilon^{-1}(G /= G') = 0. 
+!$!     Gsum = 0.0_r64
+!$!     do concurrent(ik1 = -1:1, ik2 = -1:1)   ! sums on 2D surface
+!$!        Gplusq = (ik1*crys%reclattvecs(:, 1) &
+!$!             + ik2*crys%reclattvecs(:, 2)) + qcart
+!$!        Gplusq_mag = twonorm(Gplusq)
+!$!        
+!$!        if(Gplusq_mag==0) cycle  ! avoid singularity 
+!$!        !extra exp(-qd) factor for interlayer
+!$!        Gsum = Gsum + &
+!$!             exp(-Gplusq_mag*d*2)/Gplusq_mag**2!eV^2
+!$!     end do
+!$! 
+!$!     gCoul2_inter2D = Gsum*prefac*overlap
+!$!   end function gCoul2_inter2D
+
   pure real(r64) function gCoul2_inter2D(el, crys, qcart, evec_k, evec_kp, d, eps)
     !! Function to calculate the Thomas-Fermi screened
     !! squared electron-electron vertex between 2D layers.
     !! Note: in future, it can be fused with intralayer subroutine
-    !! Currently bare Coulomb, nextup: static screening
+    !! Eq 1, PRB 106, 245414 (2022)
 
     type(crystal), intent(in) :: crys
     type(electron), intent(in) :: el
     real(r64), intent(in) :: qcart(3), d, eps
     complex(r64), intent(in) :: evec_k(:), evec_kp(:)
 
-    real(r64) :: prefac, overlap, screened_qTF
+    real(r64) :: prefac, overlap, screened_qTF, kf, qt
     real(r64) :: Gsum, Gplusq(3), Gplusq_mag
     integer :: ik1, ik2
 
-    prefac = 1.0e18_r64/crys%volume**2*qe**2/(eps*perm0)**2
+    prefac = 1.0e18_r64/crys%volume**2*qe**2/(eps*perm0)**2 
     ! in case of static dielectric, divide by diel**2
+
+    ! Volume->area for 2D   ! need to discuss the area normalization 
+    prefac = prefac*crys%thickness**2/4
+
+    ! Pre screened Thomas Fermi wavevector, to match Sanborn's prescription 
+    screened_qTF = crys%qTF/crys%epsiloninf ! 2D
 
     !This is [U(k')U^\dagger(k)]_nm squared
     !(Recall that the electron eigenvectors came out daggered from el_wann_epw.)
     overlap = (abs(dot_product(evec_kp, evec_k)))**2   ! decided to keep, need to discuss
-
-    ! Volume->area for 2D   ! need to discuss the area normalization 
-    prefac = prefac*crys%thickness**2/4
 
     !Here ignore local field effects. That is, epsilon^{-1}(G /= G') = 0. 
     Gsum = 0.0_r64
@@ -314,10 +358,11 @@ contains
             + ik2*crys%reclattvecs(:, 2)) + qcart
        Gplusq_mag = twonorm(Gplusq)
        
-       if(Gplusq_mag==0) cycle  ! avoid singularity 
+       if(Gplusq_mag==0) cycle  ! avoid singularity
        !extra exp(-qd) factor for interlayer
        Gsum = Gsum + &
-            exp(-Gplusq_mag*d*2)/Gplusq_mag**2!eV^2
+            Gplusq_mag**2/((Gplusq_mag**2 + 2*Gplusq_mag*screened_qTF)*exp(Gplusq_mag*d) &
+            + 2*screened_qTF**2*sinh(Gplusq_mag*d))**2  !eV^2
     end do
 
     gCoul2_inter2D = Gsum*prefac*overlap

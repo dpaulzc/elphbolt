@@ -203,6 +203,7 @@ contains
     !Dragless full electron BTE
     if(num%onlyebte .or. num%drag) &
          call dragless_ebte_full(num%cwd_T, self, num, crys, sym, el)
+         !call dragless_ebte_full_test(num%cwd_T, self, num, crys, sym, el)
   end subroutine bte_driver
 
   subroutine dragless_ebte_RTA(Tdir, self, num, crys, sym, el, ph)
@@ -658,17 +659,190 @@ contains
     call t%end_timer('Iterative dragless e BTE')
 
     sync all
-    if(.true.) then
-       rho_d = trans%el_sigma_inter_scalar(2)/(trans%el_sigma_inter_scalar(1)*trans%el_sigma_inter_scalar(2) -&
-         el_sigma_scalar(1)*el_sigma_scalar(2))
+!$!     if(.true.) then
+!$!        rho_d = trans%el_sigma_inter_scalar(2)/(trans%el_sigma_inter_scalar(1)*trans%el_sigma_inter_scalar(2) -&
+!$!          el_sigma_scalar(1)*el_sigma_scalar(2))
+!$!        if(this_image()==1) then
+!$!           write(*,*) "Cross layer terms [Sigma12] [Sigma21]"
+!$!           write(*,"(1E16.8, A, 1E16.8)") trans%el_sigma_inter_scalar(1), "    ", trans%el_sigma_inter_scalar(2)
+!$!           write(*,*) "Drag resistivity in Ohms"
+!$!           write(*,"(1E16.8)") rho_d/crys%thickness*1e9
+!$!        end if
+!$!     end if
+    if(num%double_layer) then
+       rho_d = el_sigma_scalar(2)/(el_sigma_scalar(2)**2 - el_sigma_scalar(1)**2)
        if(this_image()==1) then
-          write(*,*) "Cross layer terms [Sigma12] [Sigma21]"
-          write(*,"(1E16.8, A, 1E16.8)") trans%el_sigma_inter_scalar(1), "    ", trans%el_sigma_inter_scalar(2)
+          write(*,*) "!== E_2->0 ==!"
           write(*,*) "Drag resistivity in Ohms"
           write(*,"(1E16.8)") rho_d/crys%thickness*1e9
        end if
     end if
   end subroutine dragless_ebte_full
+  
+!$!   subroutine dragless_ebte_full_test(Tdir, self, num, crys, sym, el)
+!$!     !! Dragless full electron BTE calculator.
+!$!     !! It is impure as it mutates the electron sector of the bte data type and
+!$!     !! writes to disk. It should be kept private to this data type unless made safer.
+!$! 
+!$!     class(bte), intent(inout) :: self !Mutation alert!
+!$!     type(numerics), intent(in) :: num
+!$!     type(crystal), intent(in) :: crys
+!$!     type(symmetry), intent(in) :: sym
+!$!     type(electron), intent(in) :: el
+!$!     character(*), intent(in) :: Tdir
+!$! 
+!$!     !Locals
+!$! !$!     real(r64) :: el_kappa0_scalar, el_kappa0_scalar_old, el_alphabyT_scalar, el_alphabyT_scalar_old, &
+!$! !$!          el_sigma_scalar, el_sigma_scalar_old, el_sigmaS_scalar, el_sigmaS_scalar_old
+!$!     real(r64) :: el_kappa0_scalar(num%layers), el_kappa0_scalar_old(num%layers), el_alphabyT_scalar(num%layers),&
+!$!          el_alphabyT_scalar_old(num%layers), el_sigma_scalar(num%layers), el_sigma_scalar_old(num%layers), &
+!$!          el_sigmaS_scalar(num%layers), el_sigmaS_scalar_old(num%layers)
+!$!     type(timer) :: t
+!$!     integer :: it_el, icart, it_layer, it_layer_o
+!$!     type(transport_coeffs) :: trans
+!$!     logical :: layers_converged
+!$!     
+!$!     !! dummy response terms
+!$!     real(r64), allocatable :: el_sigma2(:, :, :), el_alphabyT2(:, :, :), el_sigma12(:, :, :), el_sigma21(:, :, :)
+!$!     
+!$!     !! dummy field terms
+!$!     !! find a better way to do this
+!$!     real(r64), allocatable :: field_term_E(:, :, :, :), field_term_T(:, :, :, :)
+!$!     real(r64), allocatable :: test_intra(:, :, :, :)
+!$!     real(r64) :: rho_d
+!$! 
+!$!     allocate(field_term_E, mold=self%el_response_E)
+!$!     allocate(field_term_T, mold=self%el_response_T)
+!$!     allocate(test_intra, mold=self%el_response_E) ! test intra arrays
+!$! 
+!$!     test_intra=0.0
+!$! 
+!$!     ! zero_field = 0.0_r64
+!$! 
+!$!     call trans%initialize_el(el%numbands)
+!$!     allocate(el_sigma2, el_alphabyT2, el_sigma12, el_sigma21, mold=trans%el_sigma)
+!$! 
+!$!     call t%start_timer('Iterative dragless e BTE')
+!$! 
+!$!     call print_message("Dragless electron transport:")
+!$!     call print_message("-----------------------------")
+!$! 
+!$!     !Restart with RTA solution
+!$!     ! Double layer
+!$!     self%el_response_T = 0.0_r64
+!$!     self%el_response_T(:, :, :, 1) = self%el_field_term_T  ! init
+!$!     field_term_T = 0.0_r64 
+!$!     field_term_T(:, :, :, 1) = self%el_field_term_T
+!$!     self%el_response_E = 0.0_r64
+!$!     self%el_response_E(:, :, :, 1) = self%el_field_term_E  ! init
+!$!     field_term_E = 0.0_r64 
+!$!     field_term_E(:, :, :, 1) = self%el_field_term_E
+!$! 
+!$! 
+!$!     if(this_image() == 1) then
+!$!        write(*,*) "iter    k0_el[W/m/K]        sigmaS[A/m/K]", &
+!$!             "         sigma1[1/Ohm/m]      alpha_el/T[A/m/K]         sigma2[1/Ohm/m]"
+!$!     end if
+!$! 
+!$!     iterator: do it_el = 1, num%maxiter
+!$!        !E field:
+!$!        call iterate_bte_el(num, el, crys, &  ! E field response for 1st layer
+!$!            self%el_rta_rates_ibz, field_term_E(:, :, :, 1), self%el_response_E(:, :, :, 1), &
+!$!            response_el_other = self%el_response_E(:, :, :, 2), &
+!$!            response_el_inter = self%el_response_E_inter(:, :, :, 1), &
+!$!            test = test_intra(:, :, :, 1))
+!$!        
+!$!        call iterate_bte_el(num, el, crys, &  ! E field response for 2nd layer
+!$!            self%el_rta_rates_ibz, field_term_E(:, :, :, 2), self%el_response_E(:, :, :, 2), &
+!$!            response_el_other = self%el_response_E(:, :, :, 1), &
+!$!            response_el_inter = self%el_response_E_inter(:, :, :, 2), &
+!$!            test = test_intra(:, :, :, 2))
+!$!        
+!$!        !sync all
+!$!        
+!$!        !intra_response_E(:, :, :, 1) = &
+!$!        !  self%el_response_E(:, :, :, 1) - self%el_response_E_inter(:, :, :, 1)
+!$!        !! Testing: Keeping passive layer in open circuit condition  
+!$!        self%el_response_E(:, :, :, 2) = 0.0_r64  ! j2 is kept zero
+!$!        !! Making a brutal approximation
+!$!        test_intra(:, :, :, 2) = - self%el_response_E_inter(:, :, :, 2)
+!$! 
+!$!        call calculate_transport_coeff('el', 'E', crys%T, el%spindeg, el%chempot, &
+!$!             el%ens, el%vels, crys%volume, el%wvmesh, test_intra(:, :, :, 1), sym, &
+!$!             trans%el_alphabyT, trans%el_sigma, Bfield = num%Bfield)
+!$!        trans%el_alphabyT = trans%el_alphabyT/crys%T
+!$! 
+!$!        call calculate_transport_coeff('el', 'E', crys%T, el%spindeg, el%chempot, &
+!$!             el%ens, el%vels, crys%volume, el%wvmesh, test_intra(:, :, :, 2), sym, &
+!$!             el_alphabyT2, el_sigma2, Bfield = num%Bfield)
+!$!        el_alphabyT2 = el_alphabyT2/crys%T
+!$! 
+!$!        !Enforce Kelvin-Onsager relation, only for layer 1 for now
+!$!        do icart = 1, 3
+!$!           self%el_response_T(:,:,icart, 1) = (el%ens(:,:) - el%chempot)/qe/crys%T*&
+!$!                self%el_response_E(:,:,icart, 1)
+!$!        end do
+!$! 
+!$!        ! Get transport co-effs 
+!$!        call calculate_transport_coeff('el', 'T', crys%T, el%spindeg, el%chempot, &
+!$!             el%ens, el%vels, crys%volume, el%wvmesh, self%el_response_T(:, :, :, 1), sym, &
+!$!             trans%el_kappa0, trans%el_sigmaS, Bfield = num%Bfield)
+!$! 
+!$!        !Calculate and print electron transport scalars
+!$!        el_kappa0_scalar(1) = trace(sum(trans%el_kappa0, dim = 1))/crys%dim
+!$!        el_sigmaS_scalar(1) = trace(sum(trans%el_sigmaS, dim = 1))/crys%dim
+!$!        el_sigma_scalar(1) = trace(sum(trans%el_sigma, dim = 1))/crys%dim
+!$!        el_alphabyT_scalar(1) = trace(sum(trans%el_alphabyT, dim = 1))/crys%dim
+!$!        el_sigma_scalar(2) = trace(sum(el_sigma2, dim = 1))/crys%dim
+!$!        el_alphabyT_scalar(2) = trace(sum(el_alphabyT2, dim = 1))/crys%dim
+!$!        if(this_image() == 1) then
+!$!           write(*,"(I3, A, 1E16.8, A, 1E16.8, A, 1E16.8, A, 1E16.8, A, 1E16.8)") it_el, &
+!$!                 "    ", el_kappa0_scalar(1), "     ", el_sigmaS_scalar(1), &
+!$!                "     ", el_sigma_scalar(1), "     ", el_alphabyT_scalar(1), &
+!$!                "     ", el_sigma_scalar(2)
+!$!        end if
+!$! 
+!$!        !Check convergence
+!$!        if(converged(el_kappa0_scalar_old(1), el_kappa0_scalar(1), num%conv_thres) &
+!$!          .and. converged(el_sigmaS_scalar_old(1), el_sigmaS_scalar(1), num%conv_thres) &
+!$!          .and. converged(el_sigma_scalar_old(1), el_sigma_scalar(1), num%conv_thres) &
+!$!          .and.  converged(el_alphabyT_scalar_old(1), el_alphabyT_scalar(1), num%conv_thres)&
+!$!          .and. converged(el_sigma_scalar_old(2), el_sigma_scalar(2), num%conv_thres) &
+!$!          .and.  converged(el_alphabyT_scalar_old(2), el_alphabyT_scalar(2), num%conv_thres)) then
+!$!           !! Inter layer transport coeffs
+!$!           call calculate_transport_coeff('el', 'E', crys%T, el%spindeg, el%chempot, &
+!$!              el%ens, el%vels, crys%volume, el%wvmesh, self%el_response_E_inter(:, :, :, 1), sym, &
+!$!              trans%el_alphabyT_inter, trans%el_sigma_inter, Bfield = num%Bfield) 
+!$!           trans%el_sigma_inter_scalar(1) = trace(sum(trans%el_sigma_inter, dim = 1))/crys%dim
+!$!           call calculate_transport_coeff('el', 'E', crys%T, el%spindeg, el%chempot, &
+!$!              el%ens, el%vels, crys%volume, el%wvmesh, self%el_response_E_inter(:, :, :, 2), sym, &
+!$!              trans%el_alphabyT_inter, trans%el_sigma_inter, Bfield = num%Bfield) 
+!$!           trans%el_sigma_inter_scalar(2) = trace(sum(trans%el_sigma_inter, dim = 1))/crys%dim 
+!$!           exit iterator
+!$!        else
+!$!           el_kappa0_scalar_old(1) = el_kappa0_scalar(1)
+!$!           el_sigmaS_scalar_old(1) = el_sigmaS_scalar(1)
+!$!           el_sigma_scalar_old(1) = el_sigma_scalar(1)
+!$!           el_alphabyT_scalar_old(1) = el_alphabyT_scalar(1)
+!$!           el_sigma_scalar_old(2) = el_sigma_scalar(2)
+!$!           el_alphabyT_scalar_old(2) = el_alphabyT_scalar(2)
+!$!        end if
+!$!     end do iterator
+!$! 
+!$!     call t%end_timer('Iterative dragless e BTE')
+!$! 
+!$!     sync all
+!$!     if(num%double_layer) then
+!$!        rho_d = trans%el_sigma_inter_scalar(1)/(trans%el_sigma_inter_scalar(1)*trans%el_sigma_inter_scalar(2) -&
+!$!          el_sigma_scalar(1)*el_sigma_scalar(2))
+!$!        if(this_image()==1) then
+!$!           write(*,*) "Cross layer terms [Sigma12] [Sigma21]"
+!$!           write(*,"(1E16.8, A, 1E16.8)") trans%el_sigma_inter_scalar(1), "    ", trans%el_sigma_inter_scalar(2)
+!$!           write(*,*) "Drag resistivity in Ohms"
+!$!           write(*,"(1E16.8)") rho_d/crys%thickness*1e9
+!$!        end if
+!$!     end if
+!$!   end subroutine dragless_ebte_full_test
   
   subroutine dragless_phbte_RTA(Tdir, self, num, crys, sym, ph, el)
     !! Dragless phonon BTE calculator in the relaxation time approximation.
@@ -1938,7 +2112,6 @@ contains
                       response_el_reduce(ik_fbz, m, :) = response_el_reduce(ik_fbz, m, :) + &
                            Xee_13(iproc)*(-response_el(aux2, n2, :) + response_el(aux3, n3, :) + &
                            response_el(aux4, n4, :))
-                      if(present(test)) test(ik_fbz, m, :) = response_el_reduce(ik_fbz, m, :)*tau_ibz
                    end do
 
                    if(present(response_el_inter)) then
@@ -2026,6 +2199,7 @@ contains
              !Iterate BTE
              response_el_reduce(ik_fbz, m, :) = field_term(ik_fbz, m, :) + &
                   response_el_reduce(ik_fbz, m, :)*tau_ibz
+             if(present(test)) test(ik_fbz, m, :) = response_el_reduce(ik_fbz, m, :)
              ! If there is a double layer present
              if(present(response_el_inter)) then
                 response_el_int_reduce(ik_fbz, m, :) = response_el_int_reduce(ik_fbz, m, :)*tau_ibz  ! normalize
@@ -2061,7 +2235,7 @@ contains
        !TODO
     end if
   end subroutine iterate_bte_el
-
+  
   subroutine calculate_phonon_drag(num, el, ph, idc, widc, sym, rta_rates_ibz, response_ph, &
        ph_drag_term)
     !! Subroutine to calculate the phonon drag term.
